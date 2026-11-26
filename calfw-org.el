@@ -104,16 +104,24 @@ v m | `calfw-change-view-month'
     ;; To resolve, we employ an incomplete "feature" using
     ;; `org-extend-today-until' to redefine that "today" is one second before
     ;; the start of the current date.
-
+    ;;
     ;; Then it returns all future events if `org-agenda-show-future-repeats'
     ;; is non-nil, but the `date' property is set to the date of the first
     ;; scheduled date if it is in the past relative to today. To resolve this,
     ;; we instead update the value of `date' to be our input.
+    ;; org-extend-today-until
+    ;;
+    ;; e.g.
+    ;; if current-time = 2026-11-25 7:38:37.893 pm CST
+    ;; for date=(11 24 2026), target=(0 0 0 24 11 2026 2 nil -21600) org-extend-today-until=43.64385927750005 org-today=(11 23 2026)
+    ;; for date=(11 25 2026), target=(0 0 0 25 11 2026 3 nil -21600) org-extend-today-until=19.643859277500045 org-today=(11 24 2026)
+    ;; for date=(11 26 2026), target=(0 0 0 26 11 2026 4 nil -21600) org-extend-today-until=0 org-today=(11 25 2026)
+    ;; for date=(11 27 2026), target=(0 0 0 27 11 2026 5 nil -21600) org-extend-today-until=0 org-today=(11 25 2026)
     (let ((now (float-time (current-time))))
       (cl-loop
        for date in (calfw-enumerate-days begin end)
        for target = (float-time (calfw-calendar-to-emacs date))
-       for org-extend-today-until = (max 0 (/ (- now target -1) 3600))
+       for org-extend-today-until = (max 0 (/ (- now target -1) 3600))  ;; number of seconds since midnight + 1, converted to hours
        append
        (cl-loop
         for file in org-files
@@ -282,13 +290,17 @@ day in the calendar."
 		    (total-days (string-to-number
 				 (match-string 2 extra)))
                     (date (if date-string
-                              ;; we only care about the date. hours, min, secs are dropped
-                              (org-read-date nil t date-string nil) ;; (encode-time 0 0 0 1 1 1970))
+                              ;; keep the time in date-string; a missing time defaults to 00:00:00
+                              (org-read-date nil t date-string nil (encode-time 0 0 0 1 1 1970))
                             (calfw-calendar-to-emacs at-begin))) ;; returns encoded time
-                    (start-date (time-add
-                                 (calfw-org--add-days date (- 1 cur-day))
-                                 ;; Add an extra second to ensure robustness
-                                 1))
+                    (start-date (let* ((encoded-start-date (calfw-org--add-days date (- 1 cur-day)))
+                                       (decoded-start (decode-time encoded-start-date)))
+                                  ;; a start of 00:00:00 becomes 00:00:01
+                                  (if (and (zerop (nth 0 decoded-start))
+                                           (zerop (nth 1 decoded-start))
+                                           (zerop (nth 2 decoded-start)))
+                                      (time-add encoded-start-date 1)
+                                    encoded-start-date)))
                     (end-date (calfw-org--add-days date (- total-days cur-day))))
                ;; Returns a range object (begin end text)
                (list (calendar-gregorian-from-absolute (time-to-days start-date))
